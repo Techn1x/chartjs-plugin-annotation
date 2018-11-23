@@ -7,7 +7,7 @@
  * Released under the MIT license
  * https://github.com/chartjs/Chart.Annotation.js/blob/master/LICENSE.md
  */
-(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+(function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
 
 },{}],2:[function(require,module,exports){
 module.exports = function(Chart) {
@@ -20,7 +20,9 @@ module.exports = function(Chart) {
 
 	function setAfterDataLimitsHook(axisOptions) {
 		helpers.decorate(axisOptions, 'afterDataLimits', function(previous, scale) {
-			if (previous) previous(scale);
+			if (previous) {
+				previous(scale);
+			}
 			helpers.adjustScaleRange(scale);
 		});
 	}
@@ -78,7 +80,7 @@ module.exports = function(Chart) {
 			// Add new elements, or update existing ones
 			ns.options.annotations.forEach(function(annotation) {
 				var id = annotation.id || helpers.objectId();
-				
+
 				// No element with that ID exists, and it's a valid annotation type
 				if (!ns.elements[id] && annotationTypes[annotation.type]) {
 					var cls = annotationTypes[annotation.type];
@@ -140,7 +142,7 @@ module.exports = function(Chart) {
 },{"./events.js":4,"./helpers.js":5}],3:[function(require,module,exports){
 module.exports = function(Chart) {
 	var chartHelpers = Chart.helpers;
-	
+
 	var AnnotationElement = Chart.Element.extend({
 		initialize: function() {
 			this.hidden = false;
@@ -166,26 +168,54 @@ module.exports = function(Chart) {
 module.exports = function(Chart) {
 	var chartHelpers = Chart.helpers;
 	var helpers = require('./helpers.js')(Chart);
+	var lastHoveredElement = undefined;
 
 	function collapseHoverEvents(events) {
 		var hover = false;
 		var filteredEvents = events.filter(function(eventName) {
 			switch (eventName) {
-				case 'mouseenter':
-				case 'mouseover':
-				case 'mouseout':
-				case 'mouseleave':
-					hover = true;
-					return false;
+			case 'mouseenter':
+			case 'mouseover':
+			case 'mouseout':
+			case 'mouseleave':
+				hover = true;
+				return false;
 
-				default:
-					return true;
+			default:
+				return true;
 			}
 		});
 		if (hover && filteredEvents.indexOf('mousemove') === -1) {
 			filteredEvents.push('mousemove');
 		}
 		return filteredEvents;
+	}
+
+	function applyHover(element,e,eventHandlers,beginHover) {
+		var options = element.options;
+		if(beginHover && !element.hovering) {
+			// fire hover events
+			['mouseenter', 'mouseover'].forEach(function(eventName) {
+				var handlerName = helpers.getEventHandlerName(eventName);
+				var hoverEvent = helpers.createMouseEvent(eventName, e); // recreate the event to match the handler
+				element.hovering = true;
+				lastHoveredElement = element;
+				if (typeof options[handlerName] === 'function') {
+					eventHandlers.push([options[handlerName], hoverEvent, element]);
+				}
+			});
+		} else if(!beginHover && element.hovering) {
+			// fire hover off events
+			element.hovering = false;
+			lastHoveredElement = undefined;
+			['mouseout', 'mouseleave'].forEach(function(eventName) {
+				var handlerName = helpers.getEventHandlerName(eventName);
+				var hoverEvent = helpers.createMouseEvent(eventName, e); // recreate the event to match the handler
+				if (typeof options[handlerName] === 'function') {
+					eventHandlers.push([options[handlerName], hoverEvent, element]);
+				}
+			});
+		}
 	}
 
 	function dispatcher(e) {
@@ -202,29 +232,16 @@ module.exports = function(Chart) {
 		// Detect hover events
 		if (e.type === 'mousemove') {
 			if (element && !element.hovering) {
+				// end hover on the last hovered element
+				if(lastHoveredElement && element !== lastHoveredElement) {
+					applyHover(lastHoveredElement,e,eventHandlers,false);
+				}
 				// hover started
-				['mouseenter', 'mouseover'].forEach(function(eventName) {
-					var eventHandlerName = helpers.getEventHandlerName(eventName);
-					var hoverEvent = helpers.createMouseEvent(eventName, e); // recreate the event to match the handler
-					element.hovering = true;
-					if (typeof options[eventHandlerName] === 'function') {
-						eventHandlers.push([ options[eventHandlerName], hoverEvent, element ]);
-					}
-				});
+				applyHover(element,e,eventHandlers,true);
 			} else if (!element) {
 				// hover ended
-				elements.forEach(function(element) {
-					if (element.hovering) {
-						element.hovering = false;
-						var options = element.options;
-						['mouseout', 'mouseleave'].forEach(function(eventName) {
-							var eventHandlerName = helpers.getEventHandlerName(eventName);
-							var hoverEvent = helpers.createMouseEvent(eventName, e); // recreate the event to match the handler
-							if (typeof options[eventHandlerName] === 'function') {
-								eventHandlers.push([ options[eventHandlerName], hoverEvent, element ]);
-							}
-						});
-					}
+				elements.forEach(function(el) {
+					applyHover(el,e,eventHandlers,false);
 				});
 			}
 		}
@@ -234,7 +251,7 @@ module.exports = function(Chart) {
 		//
 		// 1: wait dblClickSpeed ms, then fire click
 		// 2: cancel (1) if it is waiting then wait dblClickSpeed ms then fire click, else fire click immediately
-		// 3: cancel (1) or (2) if waiting, then fire dblclick 
+		// 3: cancel (1) or (2) if waiting, then fire dblclick
 		if (element && events.indexOf('dblclick') > -1 && typeof options.onDblclick === 'function') {
 			if (e.type === 'click' && typeof options.onClick === 'function') {
 				clearTimeout(element.clickTimeout);
@@ -243,7 +260,6 @@ module.exports = function(Chart) {
 					options.onClick.call(element, e);
 				}, dblClickSpeed);
 				e.stopImmediatePropagation();
-				e.preventDefault();
 				return;
 			} else if (e.type === 'dblclick' && element.clickTimeout) {
 				clearTimeout(element.clickTimeout);
@@ -253,12 +269,11 @@ module.exports = function(Chart) {
 
 		// Dispatch the event to the usual handler, but only if we haven't substituted it
 		if (element && typeof options[eventHandlerName] === 'function' && eventHandlers.length === 0) {
-			eventHandlers.push([ options[eventHandlerName], e, element ]);
+			eventHandlers.push([options[eventHandlerName], e, element]);
 		}
 
 		if (eventHandlers.length > 0) {
 			e.stopImmediatePropagation();
-			e.preventDefault();
 			eventHandlers.forEach(function(eventHandler) {
 				// [handler, event, element]
 				eventHandler[0].call(eventHandler[2], eventHandler[1]);
@@ -277,9 +292,9 @@ function noop() {}
 
 function elements(chartInstance) {
 	// Turn the elements object into an array of elements
-	var elements = chartInstance.annotation.elements;
-	return Object.keys(elements).map(function(id) {
-		return elements[id];
+	var els = chartInstance.annotation.elements;
+	return Object.keys(els).map(function(id) {
+		return els[id];
 	});
 }
 
@@ -292,9 +307,8 @@ function isValid(rawValue) {
 		return false;
 	} else if (typeof rawValue === 'number') {
 		return isFinite(rawValue);
-	} else {
-		return !!rawValue;
 	}
+	return !!rawValue;
 }
 
 function decorate(obj, prop, func) {
@@ -303,12 +317,12 @@ function decorate(obj, prop, func) {
 		if (obj[prop]) {
 			obj[prefix + prop] = obj[prop].bind(obj);
 			obj[prop] = function() {
-				var args = [ obj[prefix + prop] ].concat(Array.prototype.slice.call(arguments));
+				var args = [obj[prefix + prop]].concat(Array.prototype.slice.call(arguments));
 				return func.apply(obj, args);
 			};
 		} else {
 			obj[prop] = function() {
-				var args = [ undefined ].concat(Array.prototype.slice.call(arguments));
+				var args = [undefined].concat(Array.prototype.slice.call(arguments));
 				return func.apply(obj, args);
 			};
 		}
@@ -367,8 +381,9 @@ module.exports = function(Chart) {
 	function initConfig(config) {
 		config = chartHelpers.configMerge(Chart.Annotation.defaults, config);
 		if (chartHelpers.isArray(config.annotations)) {
-			config.annotations.forEach(function(annotation) {
+			config.annotations = config.annotations.map(function(annotation) {
 				annotation.label = chartHelpers.configMerge(Chart.Annotation.labelDefaults, annotation.label);
+				return chartHelpers.configMerge(Chart.Annotation.annotationDefaults, annotation);
 			});
 		}
 		return config;
@@ -437,7 +452,8 @@ module.exports = function(Chart) {
 			.sort(function(a, b) {
 				// If there are multiple elements equally close,
 				// sort them by size, then by index
-				var sizeA = a.getArea(), sizeB = b.getArea();
+				var sizeA = a.getArea();
+				var sizeB = b.getArea();
 				return (sizeA > sizeB || sizeA < sizeB) ? sizeA - sizeB : a._index - b._index;
 			})
 			.slice(0, 1)[0]; // return only the top item
@@ -462,7 +478,7 @@ module.exports = function(Chart) {
 },{}],6:[function(require,module,exports){
 // Get the chart variable
 var Chart = require('chart.js');
-Chart = typeof(Chart) === 'function' ? Chart : window.Chart;
+Chart = typeof Chart === 'function' ? Chart : window.Chart;
 
 // Configure plugin namespace
 Chart.Annotation = Chart.Annotation || {};
@@ -474,10 +490,15 @@ Chart.Annotation.drawTimeOptions = {
 };
 
 Chart.Annotation.defaults = {
+	display: true,
 	drawTime: 'afterDatasetsDraw',
 	dblClickSpeed: 350, // ms
 	events: [],
 	annotations: []
+};
+
+Chart.Annotation.annotationDefaults = {
+	display: true
 };
 
 Chart.Annotation.labelDefaults = {
@@ -512,7 +533,7 @@ Chart.pluginService.register(annotationPlugin);
 // Box Annotation implementation
 module.exports = function(Chart) {
 	var helpers = require('../helpers.js')(Chart);
-	
+
 	var BoxAnnotation = Chart.Annotation.Element.extend({
 		setDataLimits: function() {
 			var model = this._model;
@@ -525,14 +546,14 @@ module.exports = function(Chart) {
 
 			// Set the data range for this annotation
 			model.ranges = {};
-			
+
 			if (!chartArea) {
 				return;
 			}
-			
+
 			var min = 0;
 			var max = 0;
-			
+
 			if (xScale) {
 				min = helpers.isValid(options.xMin) ? options.xMin : xScale.getPixelForValue(chartArea.left);
 				max = helpers.isValid(options.xMax) ? options.xMax : xScale.getPixelForValue(chartArea.right);
@@ -570,10 +591,10 @@ module.exports = function(Chart) {
 				y2: chartArea.bottom
 			};
 
-			var left = chartArea.left, 
-				top = chartArea.top, 
-				right = chartArea.right, 
-				bottom = chartArea.bottom;
+			var left = chartArea.left;
+			var top = chartArea.top;
+			var right = chartArea.right;
+			var bottom = chartArea.bottom;
 
 			var min, max;
 
@@ -597,17 +618,23 @@ module.exports = function(Chart) {
 			model.right = right;
 			model.bottom = bottom;
 
-			// Stylistic options
-			model.borderColor = options.borderColor;
-			model.borderWidth = options.borderWidth;
-			model.backgroundColor = options.backgroundColor;
+			// Hide if display disabled
+			if(options.display && chartInstance.annotation.options.display) {
+				model.borderColor = options.borderColor;
+				model.borderWidth = options.borderWidth;
+				model.backgroundColor = options.backgroundColor;
+			} else {
+				model.borderColor = 'rgba(0,0,0,0)';
+				model.borderWidth = 0;
+				model.backgroundColor = 'rgba(0,0,0,0)';
+			}
 		},
 		inRange: function(mouseX, mouseY) {
 			var model = this._model;
 			return model &&
-				mouseX >= model.left && 
-				mouseX <= model.right && 
-				mouseY >= model.top && 
+				mouseX >= model.left &&
+				mouseX <= model.right &&
+				mouseY >= model.top &&
 				mouseY <= model.bottom;
 		},
 		getCenterPoint: function() {
@@ -644,8 +671,8 @@ module.exports = function(Chart) {
 			ctx.fillStyle = view.backgroundColor;
 
 			// Draw
-			var width = view.right - view.left,
-				height = view.bottom - view.top;
+			var width = view.right - view.left;
+			var height = view.bottom - view.top;
 			ctx.fillRect(view.left, view.top, width, height);
 			ctx.strokeRect(view.left, view.top, width, height);
 
@@ -664,6 +691,84 @@ module.exports = function(Chart) {
 
 	var horizontalKeyword = 'horizontal';
 	var verticalKeyword = 'vertical';
+
+	function LineFunction(view) {
+		// Describe the line in slope-intercept form (y = mx + b).
+		// Note that the axes are rotated 90° CCW, which causes the
+		// x- and y-axes to be swapped.
+		var m = (view.x2 - view.x1) / (view.y2 - view.y1);
+		var b = view.x1 || 0;
+
+		this.m = m;
+		this.b = b;
+
+		this.getX = function(y) {
+			// Coordinates are relative to the origin of the canvas
+			return m * (y - view.y1) + b;
+		};
+
+		this.getY = function(x) {
+			return ((x - b) / m) + view.y1;
+		};
+
+		this.intersects = function(x, y, epsilon) {
+			epsilon = epsilon || 0.001;
+			var dy = this.getY(x);
+			var dx = this.getX(y);
+			return (
+				(!isFinite(dy) || Math.abs(y - dy) < epsilon) &&
+				(!isFinite(dx) || Math.abs(x - dx) < epsilon)
+			);
+		};
+	}
+
+	function calculateLabelPosition(view, width, height, padWidth, padHeight) {
+		var line = view.line;
+		var ret = {};
+		var xa = 0;
+		var ya = 0;
+
+		switch (true) {
+		// top align
+		case view.mode === verticalKeyword && view.labelPosition === 'top':
+			ya = padHeight + view.labelYAdjust;
+			xa = (width / 2) + view.labelXAdjust;
+			ret.y = view.y1 + ya;
+			ret.x = (isFinite(line.m) ? line.getX(ret.y) : view.x1) - xa;
+			break;
+
+		// bottom align
+		case view.mode === verticalKeyword && view.labelPosition === 'bottom':
+			ya = height + padHeight + view.labelYAdjust;
+			xa = (width / 2) + view.labelXAdjust;
+			ret.y = view.y2 - ya;
+			ret.x = (isFinite(line.m) ? line.getX(ret.y) : view.x1) - xa;
+			break;
+
+		// left align
+		case view.mode === horizontalKeyword && view.labelPosition === 'left':
+			xa = padWidth + view.labelXAdjust;
+			ya = -(height / 2) + view.labelYAdjust;
+			ret.x = view.x1 + xa;
+			ret.y = line.getY(ret.x) + ya;
+			break;
+
+		// right align
+		case view.mode === horizontalKeyword && view.labelPosition === 'right':
+			xa = width + padWidth + view.labelXAdjust;
+			ya = -(height / 2) + view.labelYAdjust;
+			ret.x = view.x2 - xa;
+			ret.y = line.getY(ret.x) + ya;
+			break;
+
+		// center align
+		default:
+			ret.x = ((view.x1 + view.x2 - width) / 2) + view.labelXAdjust;
+			ret.y = ((view.y1 + view.y2 - height) / 2) + view.labelYAdjust;
+		}
+
+		return ret;
+	}
 
 	var LineAnnotation = Chart.Annotation.Element.extend({
 		setDataLimits: function() {
@@ -704,7 +809,7 @@ module.exports = function(Chart) {
 				y2: chartArea.bottom
 			};
 
-			if (this.options.mode == horizontalKeyword) {
+			if (this.options.mode === horizontalKeyword) {
 				model.x1 = chartArea.left;
 				model.x2 = chartArea.right;
 				model.y1 = pixel;
@@ -747,10 +852,17 @@ module.exports = function(Chart) {
 			model.borderWidth = options.borderWidth;
 			model.borderDash = options.borderDash || [];
 			model.borderDashOffset = options.borderDashOffset || 0;
+
+			// Hide if display is disabled
+			if(!options.display || !chartInstance.annotation.options.display) {
+				model.labelEnabled = false;
+				model.borderColor = 'rgba(0,0,0,0)';
+				model.borderWidth = 0;
+			}
 		},
 		inRange: function(mouseX, mouseY) {
 			var model = this._model;
-			
+
 			return (
 				// On the line
 				model.line &&
@@ -759,9 +871,9 @@ module.exports = function(Chart) {
 				// On the label
 				model.labelEnabled &&
 				model.labelContent &&
-				mouseX >= model.labelX && 
-				mouseX <= model.labelX + model.labelWidth && 
-				mouseY >= model.labelY && 
+				mouseX >= model.labelX &&
+				mouseX <= model.labelX + model.labelWidth &&
+				mouseY >= model.labelY &&
 				mouseY <= model.labelY + model.labelHeight
 			);
 		},
@@ -845,82 +957,6 @@ module.exports = function(Chart) {
 			ctx.restore();
 		}
 	});
-
-	function LineFunction(view) {
-		// Describe the line in slope-intercept form (y = mx + b).
-		// Note that the axes are rotated 90° CCW, which causes the
-		// x- and y-axes to be swapped.
-		var m = (view.x2 - view.x1) / (view.y2 - view.y1);
-		var b = view.x1 || 0;
-
-		this.m = m;
-		this.b = b;
-
-		this.getX = function(y) {
-			// Coordinates are relative to the origin of the canvas
-			return m * (y - view.y1) + b;
-		};
-
-		this.getY = function(x) {
-			return ((x - b) / m) + view.y1;
-		};
-
-		this.intersects = function(x, y, epsilon) {
-			epsilon = epsilon || 0.001;
-			var dy = this.getY(x),
-				dx = this.getX(y);
-			return (
-				(!isFinite(dy) || Math.abs(y - dy) < epsilon) &&
-				(!isFinite(dx) || Math.abs(x - dx) < epsilon)
-			);
-		};
-	}
-
-	function calculateLabelPosition(view, width, height, padWidth, padHeight) {
-		var line = view.line;
-		var ret = {}, xa = 0, ya = 0;
-
-		switch (true) {
-			// top align
-			case view.mode == verticalKeyword && view.labelPosition == "top":
-				ya = padHeight + view.labelYAdjust;
-				xa = (width / 2) + view.labelXAdjust;
-				ret.y = view.y1 + ya;
-				ret.x = (isFinite(line.m) ? line.getX(ret.y) : view.x1) - xa;
-			break;
-
-			// bottom align
-			case view.mode == verticalKeyword && view.labelPosition == "bottom":
-				ya = height + padHeight + view.labelYAdjust;
-				xa = (width / 2) + view.labelXAdjust;
-				ret.y = view.y2 - ya;
-				ret.x = (isFinite(line.m) ? line.getX(ret.y) : view.x1) - xa;
-			break;
-
-			// left align
-			case view.mode == horizontalKeyword && view.labelPosition == "left":
-				xa = padWidth + view.labelXAdjust;
-				ya = -(height / 2) + view.labelYAdjust;
-				ret.x = view.x1 + xa;
-				ret.y = line.getY(ret.x) + ya;
-			break;
-
-			// right align
-			case view.mode == horizontalKeyword && view.labelPosition == "right":
-				xa = width + padWidth + view.labelXAdjust;
-				ya = -(height / 2) + view.labelYAdjust;
-				ret.x = view.x2 - xa;
-				ret.y = line.getY(ret.x) + ya;
-			break;
-
-			// center align
-			default:
-				ret.x = ((view.x1 + view.x2 - width) / 2) + view.labelXAdjust;
-				ret.y = ((view.y1 + view.y2 - height) / 2) + view.labelYAdjust;
-		}
-
-		return ret;
-	}
 
 	return LineAnnotation;
 };
